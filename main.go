@@ -1,22 +1,35 @@
 package main
 
 import (
-	"log"
 	"net/http"
-	"os"
-	"strconv"
+	"net/http/httputil"
+	"net/url"
+
+	"github.com/gin-gonic/gin"
 )
 
-func main() {
-	if len(os.Args) != 2 {
-		log.Fatalf("Usage: %s <port>", os.Args[0])
-	}
-	if _, err := strconv.Atoi(os.Args[1]); err != nil {
-		log.Fatalf("Invalid port: %s (%s)\n", os.Args[1], err)
+func proxy(c *gin.Context) {
+	remote, err := url.Parse("http://localhost:8008")
+	if err != nil {
+		panic(err)
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		println("--->", os.Args[1], req.URL.String())
-	})
-	http.ListenAndServe(":"+os.Args[1], nil)
+	proxy := httputil.NewSingleHostReverseProxy(remote)
+
+	proxy.Director = func(req *http.Request) {
+		req.Header = c.Request.Header
+		req.Host = remote.Host
+		req.URL.Scheme = remote.Scheme
+		req.URL.Host = remote.Host
+		req.URL.Path = c.Param("proxyPath")
+	}
+
+	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+func main() {
+	r := gin.Default()
+
+	r.Any("/*proxyPath", proxy)
+	r.Run(":8007")
 }
