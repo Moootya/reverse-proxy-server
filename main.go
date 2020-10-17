@@ -1,53 +1,64 @@
 package main
 
 import (
+	"fmt"
+	"gopkg.in/yaml.v2"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
+	"path/filepath"
 )
 
 func main() {
-	port := 777
-	targetURL := "http://localhost:8008"
+	filePath, _ := filepath.Abs("./src.yml")
 
-	u, err := url.Parse(targetURL)
-	if err != nil {
-		log.Fatalf("Could not parse downstream url: %s", targetURL)
+	config := getConfig(filePath)
+	listenPort := config.Proxy.ListenPort
+	targets := config.Proxy.Servers
+
+	for _, target := range targets {
+
+		urlTarget, _ := url.Parse(target.TargetUrl)
+		proxy := httputil.NewSingleHostReverseProxy(urlTarget)
+
+		director := proxy.Director
+		proxy.Director = func(request *http.Request) {
+			director(request)
+			request.Header.Set("X-Forwarded-Host", request.Header.Get("Host"))
+			request.Host = request.URL.Host
+		}
+
+		http.HandleFunc(target.Prefix, proxy.ServeHTTP)
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(u)
-
-	//proxy.ModifyResponse = func(res *http.Response) error {
-	//	responseContent := map[string]interface{}{}
-	//	err := parseResponse(res, &responseContent)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	return captureMetrics(responseContent)
-	//}
-
-	director := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		director(req)
-		req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
-		req.Host = req.URL.Host
-	}
-
-	http.HandleFunc("/", proxy.ServeHTTP)
-	log.Printf("Listening on port %d", port)
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), nil))
+	log.Printf("Listening on port %d", listenPort)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil))
 }
 
-//func parseResponse(res *http.Response, unmarshalStruct interface{}) error {
-//	body, err := ioutil.ReadAll(res.Body)
-//	if err != nil {
-//		return err
-//	}
-//	res.Body.Close()
-//
-//	res.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-//	return json.Unmarshal(body, unmarshalStruct)
-//}
+// Структура для конфига
+type Service struct {
+	Proxy struct {
+		ListenPort int `yaml:"listenPort"`
+		Servers    []struct {
+			Name      string `yaml:"name"`
+			Prefix    string `yaml:"prefix"`
+			TargetUrl string `yaml:"target"`
+		}
+	}
+}
+
+// getConfig считывает yaml-файл с настройками обратного прокси
+// Возвращает структуру Service
+func getConfig(filePath string) Service {
+
+	var service Service
+	yamlFile, _ := ioutil.ReadFile(filePath)
+
+	err := yaml.Unmarshal(yamlFile, &service)
+	if err != nil {
+		panic(err)
+	}
+	return service
+}

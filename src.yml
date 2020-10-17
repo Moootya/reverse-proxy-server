@@ -1,0 +1,12 @@
+
+proxy:
+  listenPort: 771
+
+  servers:
+    - name: localhost_server_1
+      prefix: '/app1/'
+      target: 'http://localhost:8008/app1'
+
+    - name: localhost_server_2
+      prefix: '/app2/'
+      target: 'http://localhost:8007/app2'
